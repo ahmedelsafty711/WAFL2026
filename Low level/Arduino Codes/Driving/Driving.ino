@@ -14,7 +14,7 @@
 //* USER CONFIG                        *//
 //**************************************//
 
-const float WHEEL_RADIUS = 0.085;     // Wheel radius in meters
+const float WHEEL_RADIUS = 0.1;     // Wheel radius in meters
 const int PULSES_PER_REV = 600;       // Encoder pulses per full encoder shaft rotation
 
 // Gear ratio: wheel_rev = encoder_rev / GEAR_RATIO
@@ -166,6 +166,8 @@ void loop()
   {
     // User inputs distance in meters 
     float distanceMeters = Serial.parseFloat();
+    //,2distanceMeters = distanceMeters - (0.15*(distanceMeters/abs(distanceMeters)));
+    //float distanceMeters = distanceMeters_ip - (0.15*distanceMeters_ip);
 
     if (distanceMeters != 0)
     {
