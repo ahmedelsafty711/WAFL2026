@@ -1,13 +1,16 @@
-/*
- * Motor Control System with Limit Switches
- * 
- * This program controls a motor using two relays for direction control
- * with safety limit switches and manual control buttons.
- * 
- * Relay Wiring:
- * Relay1 - NC:GND - NO:VCC - Com:Yellow (Motor control line 1)
- * Relay2 - NC:GND - NO:VCC - Com:White (Motor control line 2)
- */
+//*******************************************************************************//
+//*     TITLE: Motor Control System with Limit Switches                         *//
+//*     AUTHORS: Mohamed Montasser                                              *//
+//*     DATE: 18/DEC/2025                                                       *//
+//*     DESCRIPTION:                                                             *
+//*     This program controls a motor using two relays for direction control     *
+//*     with safety limit switches and manual control buttons.                   *
+//*     Relay Wiring:                                                            *
+//*     Relay1 - NC:GND - NO:VCC - Com:Yellow (Motor control line 1)             *
+//*     Relay2 - NC:GND - NO:VCC - Com:White (Motor control line 2)              *
+//*******************************************************************************//
+
+
 
 // Pin Definitions
 #define sig1 9        // Relay 1 control signal - controls motor direction
