@@ -7,7 +7,8 @@
   • Rotates a DC motor to target position using encoder feedback
   • Stops precisely with overshoot protection
 
-  Author: Omar Emad & Mohamed Montaser
+  Author: Omar Emad & Mohamed Montasser
+  Date: 9/12/2025
 ===============================================================
 */
 
