@@ -1,6 +1,6 @@
 //*******************************************************************************//
 //*     TITLE: Motor Control System with Limit Switches                         *//
-//*     AUTHORS: Mohamed Montasser                                              *//
+//*     AUTHORS: Omar Emad & Mohamed Montasser                                  *//
 //*     DATE: 18/DEC/2025                                                       *//
 //*     DESCRIPTION:                                                             *
 //*     This program controls a motor using two relays for direction control     *
