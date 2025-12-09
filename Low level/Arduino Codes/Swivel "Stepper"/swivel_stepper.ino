@@ -1,6 +1,6 @@
 //*******************************************************************************//
 //*     TITLE: Stepper Motor Angle Control                                      *//
-//*     AUTHORS: Mohamed Montasser                                              *//
+//*     AUTHORS: Omar Emad & Mohamed Montasser                                  *//
 //*     DATE: 01/DEC/2025                                                       *//
 //*     DESCRIPTION:                                                             *
 //*     This program drives a NEMA17 stepper motor (with planetary gearbox)      *
