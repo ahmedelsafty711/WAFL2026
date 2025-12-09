@@ -1,75 +1,120 @@
+/*
+===============================================================
+  ARDUINO ENCODER-DRIVEN DC MOTOR POSITION CONTROL
+---------------------------------------------------------------
+  • Reads user-entered angle from Serial Monitor
+  • Converts target angle → encoder pulses
+  • Rotates a DC motor to target position using encoder feedback
+  • Stops precisely with overshoot protection
+
+  Author: Omar Emad & Mohamed Montaser
+===============================================================
+*/
+
 // ========================
 // USER SETTINGS
 // ========================
-const float PPR = 23700.0;  
-const int pinA = 2;
-const int pinB = 3;
-const int motorPWM = 6;
-const int motorDIR = 7;
 
+// Encoder pulses per full revolution (PPR)
+const float PPR = 23700.0;
+
+// Quadrature encoder input pins
+const int pinA = 2;     // Encoder A (interrupt pin)
+const int pinB = 3;     // Encoder B
+
+// Motor control pins
+const int motorPWM = 6; // PWM speed control pin
+const int motorDIR = 7; // Direction pin (HIGH=CW, LOW=CCW)
+
+// Global encoder position counter (updated in ISR)
 volatile long encoderCount = 0;
 
+
 // ========================
-// ENCODER ISR
+// ENCODER INTERRUPT SERVICE ROUTINE
 // ========================
+/*
+  Called on rising edge of encoder A.
+  Determines direction by reading encoder B.
+*/
 void encoderA_ISR() {
   int b = digitalRead(pinB);
+
+  // Quadrature decoding: A leads B (CW), B leads A (CCW)
   if (b == HIGH) encoderCount++;
   else encoderCount--;
 }
 
+
+// ========================
+// SETUP
 // ========================
 void setup() {
   Serial.begin(115200);
 
+  // Setup encoder pins
   pinMode(pinA, INPUT_PULLUP);
   pinMode(pinB, INPUT_PULLUP);
+
+  // Attach interrupt on rising edge of Encoder A
   attachInterrupt(digitalPinToInterrupt(pinA), encoderA_ISR, RISING);
 
+  // Motor output pins
   pinMode(motorPWM, OUTPUT);
   pinMode(motorDIR, OUTPUT);
 
-  Serial.println("Enter target angle:");
+  Serial.println("Enter target angle (degrees):");
 }
+
 
 // ========================
-void motorForward(int s) {
+// MOTOR CONTROL FUNCTIONS
+// ========================
+
+// Spin motor clockwise (CW)
+void motorForward(int speed) {
   digitalWrite(motorDIR, HIGH);
-  analogWrite(motorPWM, s);
+  analogWrite(motorPWM, speed);
 }
 
-void motorBackward(int s) {
+// Spin motor counter-clockwise (CCW)
+void motorBackward(int speed) {
   digitalWrite(motorDIR, LOW);
-  analogWrite(motorPWM, s);
+  analogWrite(motorPWM, speed);
 }
 
+// Stop motor
 void motorStop() {
   analogWrite(motorPWM, 0);
 }
 
+
 // ========================
-// MAIN
+// MAIN LOOP
 // ========================
 void loop() {
 
-  static bool moving = false;
-  static long targetPulse = 0;
-  static bool directionSet = false;
+  static bool moving = false;        // Whether a motion command is active
+  static long targetPulse = 0;       // Target encoder count for angle
+  static bool directionSet = false;  // Only set motor direction once
 
-  // --------- SERIAL INPUT ---------
-  // --------- SERIAL INPUT ---------
-if (Serial.available()) {
+  // -----------------------------------------------------------
+  // SERIAL INPUT: Read user angle and convert to target pulses
+  // -----------------------------------------------------------
+  if (Serial.available()) {
     String input = Serial.readStringUntil('\n');
-    input.trim();    // remove spaces and invisible chars
+    input.trim();
 
-    if (input.length() == 0) return;  // ignore empty lines
+    // Ignore noise or accidental empty input
+    if (input.length() == 0) return;
 
+    // Check if input was parsed as zero incorrectly
     if (!input.equals("0") && input.toFloat() == 0) {
-        // Means parseFloat returned 0 but user didn’t actually send "0"
-        Serial.println("Ignored accidental zero (noise).");
-        return;
+      Serial.println("Ignored accidental zero (noise).");
+      return;
     }
 
+    // Convert angle → pulses
     float angle = input.toFloat();
     targetPulse = (long)(angle / 360.0 * PPR);
 
@@ -80,10 +125,12 @@ if (Serial.available()) {
 
     moving = true;
     directionSet = false;
-}
+  }
 
 
-  // --------- PRINT CURRENT POSITION ---------
+  // -----------------------------------------------------------
+  // PRINT CURRENT POSITION
+  // -----------------------------------------------------------
   long pulses = encoderCount;
   float currentAngle = (pulses * 360.0) / PPR;
 
@@ -92,14 +139,17 @@ if (Serial.available()) {
   Serial.print("   Angle: ");
   Serial.println(currentAngle);
 
-  delay(50);  // Slow print rate
+  delay(50);  // Slow output refresh rate
 
-  // --------- MOVEMENT CONTROL ---------
+
+  // -----------------------------------------------------------
+  // MOVEMENT CONTROL LOGIC
+  // -----------------------------------------------------------
   if (moving) {
 
     long error = targetPulse - encoderCount;
 
-    // ---- SET DIRECTION ONCE ----
+    // ---- Set motor direction ONCE at the start of motion ----
     if (!directionSet) {
       if (error > 0) {
         motorForward(180);
@@ -111,7 +161,7 @@ if (Serial.available()) {
       directionSet = true;
     }
 
-    // ---- STOP CONDITION ----
+    // ---- Normal stop condition ----
     if (abs(error) < 80) {
       motorStop();
       moving = false;
@@ -126,13 +176,17 @@ if (Serial.available()) {
       return;
     }
 
-    // ---- BOUNCE-PROOF OVERSHOOT CHECK ----
+    // ---- Overshoot protection ----
     if (directionSet) {
+      
+      // If moving CW but error indicates we passed target
       if (error < 0 && digitalRead(motorDIR) == HIGH) {
         motorStop();
         moving = false;
         Serial.println("Overshoot CW — Stopped (No Bounce).");
       }
+
+      // If moving CCW but error indicates we passed target
       if (error > 0 && digitalRead(motorDIR) == LOW) {
         motorStop();
         moving = false;
