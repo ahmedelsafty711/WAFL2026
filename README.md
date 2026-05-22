@@ -20,7 +20,7 @@ safety, efficiency, and cost-effectiveness.
 <details>
 <summary><strong>Team members</strong></summary>
 
-- Ahmed Elsafty
+- Ahmed Salah Eldeen 
 - Ahmed Ashraf
 - Amr Khaled
 - Marina Alber
