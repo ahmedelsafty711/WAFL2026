@@ -117,7 +117,7 @@ LIBGL_ALWAYS_SOFTWARE=1 ros2 launch wafl2026 humble4.launch.py
 
 ---
 
-## Recommended VM Settings
+## Recommended VM Settings (If you are not using Dualboot)
 
 | Setting                 | Value   |
 | ----------------------- | ------- |
