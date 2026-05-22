@@ -36,7 +36,6 @@ safety, efficiency, and cost-effectiveness.
 WAFL2026/
 ├─ README.md
 ├─ Perception/
-├─ Vision/
 ├─ Localization/
 │  ├─ Hardware/
 │  └─ Simulation/
