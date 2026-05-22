@@ -44,7 +44,6 @@ WAFL2026/
 │  └─ Simulation/
 ├─ Integration/
 ├─ Low level/
-├─ src/
 ├─ Documentation/
 └─ Project files/
 ```
