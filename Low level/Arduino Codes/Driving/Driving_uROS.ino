@@ -1,7 +1,7 @@
 //*******************************************************************************//
-//*     TITLE: Distance-based movement control                                  *//
+//*     TITLE: Dual PWM velocity control with encoder feedback                  *//
 //*     AUTHORS: Omar Emad & Mohamed Montasser                                  *//
-//*     FINAL ODOM VERSION                                                      *//
+//*     PWM VELOCITY VERSION                                                    *//
 //*******************************************************************************//
 
 #include <micro_ros_arduino.h>
@@ -18,12 +18,9 @@
 // ROBOT CONSTANTS
 //-------------------------------------------------------------------
 
-const float WHEEL_RADIUS = 0.1;
-const int PULSES_PER_REV = 600;
-
-float GEAR_RATIO = (1885.0 / 600.0);
-
-const int MOTOR_SPEED = 80;
+const float WHEEL_RADIUS     = 0.1;
+const int   PULSES_PER_REV   = 600;
+float       GEAR_RATIO       = (1885.0 / 600.0);
 
 //-------------------------------------------------------------------
 // MOTOR PINS
@@ -46,37 +43,39 @@ const int ENCODER_B = 16;
 // VARIABLES
 //-------------------------------------------------------------------
 
-// Used ONLY for distance movement logic
-volatile long encoderCount = 0;
-
 // Used for odometry publishing
 volatile long encoderOdom = 0;
-
-long targetPulses = 0;
-
-bool motorRunning = false;
 
 // direction for odom sign
 int direction = 1;
 
 // RPM calculation
-unsigned long lastTime = 0;
-long lastCount = 0;
+unsigned long lastTime  = 0;
+long          lastCount = 0;
+
+// Cached PWM values (signed: negative = reverse)
+volatile int pwm_left_val  = 0;
+volatile int pwm_right_val = 0;
 
 //-------------------------------------------------------------------
 // micro-ROS VARIABLES
 //-------------------------------------------------------------------
 
-rcl_subscription_t subscriber;
-std_msgs__msg__Float32 recv_msg;
+// Two subscribers — one per wheel
+rcl_subscription_t sub_left;
+rcl_subscription_t sub_right;
 
-rcl_publisher_t encoder_pub;
+std_msgs__msg__Float32 msg_left;
+std_msgs__msg__Float32 msg_right;
+
+// Encoder publisher (unchanged)
+rcl_publisher_t        encoder_pub;
 std_msgs__msg__Float32 encoder_msg;
 
-rclc_support_t support;
-rcl_node_t node;
-rcl_allocator_t allocator;
-rclc_executor_t executor;
+rclc_support_t   support;
+rcl_node_t       node;
+rcl_allocator_t  allocator;
+rclc_executor_t  executor;
 
 //-------------------------------------------------------------------
 // ENCODER ISR
@@ -84,7 +83,6 @@ rclc_executor_t executor;
 
 void IRAM_ATTR encoderISR()
 {
-  encoderCount++;
   encoderOdom++;
 }
 
@@ -92,104 +90,67 @@ void IRAM_ATTR encoderISR()
 // MOTOR CONTROL
 //-------------------------------------------------------------------
 
-void motorsStop()
+// Apply a signed PWM value [-255 … 255] to a single motor.
+// channel 0 → M1,  channel 1 → M2
+void applyMotor(int channel, int dirPin, int signedPWM)
 {
-  ledcWrite(0, 0);
-  ledcWrite(1, 0);
-}
+  int clampedPWM = constrain(abs(signedPWM), 0, 255);
 
-void motorsForward()
-{
-  digitalWrite(M1_DIR, LOW);
-  digitalWrite(M2_DIR, HIGH);
+  if (signedPWM >= 0)
+    digitalWrite(dirPin, LOW);   // forward
+  else
+    digitalWrite(dirPin, HIGH);  // backward
 
-  ledcWrite(0, MOTOR_SPEED);
-  ledcWrite(1, MOTOR_SPEED);
-}
-
-void motorsBackward()
-{
-  digitalWrite(M1_DIR, HIGH);
-  digitalWrite(M2_DIR, LOW);
-
-  ledcWrite(0, MOTOR_SPEED);
-  ledcWrite(1, MOTOR_SPEED);
+  ledcWrite(channel, clampedPWM);
 }
 
 //-------------------------------------------------------------------
-// RPM CALCULATION
+// micro-ROS CALLBACKS
+//-------------------------------------------------------------------
+
+void left_pwm_callback(const void *msgin)
+{
+  const std_msgs__msg__Float32 *msg =
+    (const std_msgs__msg__Float32 *)msgin;
+
+  pwm_left_val = (int)msg->data;          // signed: negative = reverse
+  applyMotor(0, M1_DIR, pwm_left_val);
+
+  // Update odom direction based on left wheel as reference
+  direction = (pwm_left_val >= 0) ? 1 : -1;
+}
+
+void right_pwm_callback(const void *msgin)
+{
+  const std_msgs__msg__Float32 *msg =
+    (const std_msgs__msg__Float32 *)msgin;
+
+  pwm_right_val = -(int)msg->data;         // signed: negative = reverse
+  applyMotor(1, M2_DIR, pwm_right_val);
+}
+
+//-------------------------------------------------------------------
+// RPM CALCULATION  (unchanged logic)
 //-------------------------------------------------------------------
 
 float calculateRPM()
 {
   unsigned long currentTime = millis();
-
-  unsigned long dt = currentTime - lastTime;
+  unsigned long dt          = currentTime - lastTime;
 
   if (dt >= 200)
   {
-    long diff = encoderCount - lastCount;
+    long diff  = encoderOdom - lastCount;
+    lastCount  = encoderOdom;
+    lastTime   = currentTime;
 
-    lastCount = encoderCount;
-    lastTime = currentTime;
-
-    float encoder_rps =
-      (float)diff / PULSES_PER_REV;
-
-    float wheel_rps =
-      encoder_rps / GEAR_RATIO;
+    float encoder_rps = (float)diff / PULSES_PER_REV;
+    float wheel_rps   = encoder_rps / GEAR_RATIO;
 
     return wheel_rps * 60.0;
   }
 
   return -1;
-}
-
-//-------------------------------------------------------------------
-// micro-ROS CALLBACK
-//-------------------------------------------------------------------
-
-void cmd_callback(const void *msgin)
-{
-  if (motorRunning)
-    return;
-
-  const std_msgs__msg__Float32 *msg =
-    (const std_msgs__msg__Float32 *)msgin;
-
-  float distanceMeters = msg->data;
-
-  if (distanceMeters == 0)
-    return;
-
-  // Reset ONLY motion counter
-  encoderCount = 0;
-
-  float wheelRevs =
-    distanceMeters /
-    (2.0 * PI * WHEEL_RADIUS);
-
-  float encoderRevsNeeded =
-    wheelRevs * GEAR_RATIO;
-
-  targetPulses =
-    abs(encoderRevsNeeded * PULSES_PER_REV);
-
-  if (distanceMeters > 0)
-  {
-    direction = 1;
-    motorsForward();
-  }
-  else
-  {
-    direction = -1;
-    motorsBackward();
-  }
-
-  motorRunning = true;
-
-  lastTime = millis();
-  lastCount = 0;
 }
 
 //-------------------------------------------------------------------
@@ -199,27 +160,23 @@ void cmd_callback(const void *msgin)
 void setup()
 {
   Serial.begin(115200);
-
   delay(2000);
-
   Serial.println("Boot OK");
 
   set_microros_wifi_transports(
     "EME-SIEMENS_GPS",
     "gps12345",
-    "192.168.0.107",
+    "192.168.0.126",
     8888
   );
 
   Serial.println("WiFi transport configured");
-
   Serial.print("ESP IP: ");
   Serial.println(WiFi.localIP());
 
-  // PWM setup
+  // PWM channels
   ledcSetup(0, 5000, 8);
   ledcSetup(1, 5000, 8);
-
   ledcAttachPin(M1_PWM, 0);
   ledcAttachPin(M2_PWM, 1);
 
@@ -229,8 +186,6 @@ void setup()
   // Encoder
   pinMode(ENCODER_A, INPUT_PULLUP);
   pinMode(ENCODER_B, INPUT_PULLUP);
-
-  // Single-channel encoder mode
   attachInterrupt(
     digitalPinToInterrupt(ENCODER_B),
     encoderISR,
@@ -242,59 +197,49 @@ void setup()
   // micro-ROS init
   allocator = rcl_get_default_allocator();
 
-  rclc_support_init(
-    &support,
-    0,
-    NULL,
-    &allocator
-  );
+  rclc_support_init(&support, 0, NULL, &allocator);
 
-  rclc_node_init_default(
-    &node,
-    "robot_node",
-    "",
-    &support
-  );
+  rclc_node_init_default(&node, "robot_node", "", &support);
 
-  // Subscriber
+  // Subscriber — left wheel
   rclc_subscription_init_default(
-    &subscriber,
+    &sub_left,
     &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(
-      std_msgs,
-      msg,
-      Float32
-    ),
-    "/move_distance"
+    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
+    "/pwm_left"
   );
 
-  // Publisher
+  // Subscriber — right wheel
+  rclc_subscription_init_default(
+    &sub_right,
+    &node,
+    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
+    "/pwm_right"
+  );
+
+  // Publisher — encoder odometry (unchanged)
   rclc_publisher_init_default(
     &encoder_pub,
     &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(
-      std_msgs,
-      msg,
-      Float32
-    ),
+    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
     "/encoder_count"
   );
 
-  // Executor
-  rclc_executor_init(
-    &executor,
-    &support.context,
-    1,
-    &allocator
+  // Executor needs 2 handles now (one per subscriber)
+  rclc_executor_init(&executor, &support.context, 2, &allocator);
+
+  rclc_executor_add_subscription(
+    &executor, &sub_left,  &msg_left,
+    &left_pwm_callback,  ON_NEW_DATA
   );
 
   rclc_executor_add_subscription(
-    &executor,
-    &subscriber,
-    &recv_msg,
-    &cmd_callback,
-    ON_NEW_DATA
+    &executor, &sub_right, &msg_right,
+    &right_pwm_callback, ON_NEW_DATA
   );
+
+  lastTime  = millis();
+  lastCount = 0;
 }
 
 //-------------------------------------------------------------------
@@ -303,58 +248,19 @@ void setup()
 
 void loop()
 {
-  rclc_executor_spin_some(
-    &executor,
-    RCL_MS_TO_NS(10)
-  );
+  rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
 
-  // Continuous odom publishing
-  encoder_msg.data =
-    encoderOdom * direction;
+  // Continuous odom publishing (unchanged)
+  encoder_msg.data = encoderOdom * direction;
+  rcl_publish(&encoder_pub, &encoder_msg, NULL);
 
-  rcl_publish(
-    &encoder_pub,
-    &encoder_msg,
-    NULL
-  );
-
-  // ---------------- MOTOR RUNNING ----------------
-
-  if (motorRunning)
+  // Optional RPM debug print
+  float rpm = calculateRPM();
+  if (rpm >= 0)
   {
-    float rpm = calculateRPM();
-
-    if (rpm >= 0)
-    {
-      Serial.print("Encoder Count = ");
-      Serial.print(encoderCount);
-
-      Serial.print(" | Wheel RPM = ");
-      Serial.println(rpm);
-    }
-
-    // Stop when target reached
-    if (abs(encoderCount) >= targetPulses)
-    {
-      motorsStop();
-
-      motorRunning = false;
-
-      float wheel_revs_real =
-        (float)encoderCount /
-        (PULSES_PER_REV * GEAR_RATIO);
-
-      float distance =
-        wheel_revs_real *
-        (2.0 * PI * WHEEL_RADIUS);
-
-      Serial.println("---- Movement Completed ----");
-
-      Serial.print("Final encoder pulses: ");
-      Serial.println(encoderCount);
-
-      Serial.print("Distance moved (m): ");
-      Serial.println(distance, 4);
-    }
+    Serial.print("Encoder Odom = ");
+    Serial.print(encoderOdom);
+    Serial.print(" | Wheel RPM = ");
+    Serial.println(rpm);
   }
 }
